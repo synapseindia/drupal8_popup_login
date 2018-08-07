@@ -1,5 +1,5 @@
 
-Popup login Module enables user to Login and Register using popup forms.
+Drupal 8 Popup login Module enables user to Login and Register using popup forms.
 
 INSTALLATION INSTRUCTIONS
 
