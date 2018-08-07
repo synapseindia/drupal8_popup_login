@@ -1,0 +1,7 @@
+login_popup:
+  version: VERSION
+  dependencies:
+    - core/jquery
+    - core/drupal
+    - core/drupalSettings
+    - core/jquery.once

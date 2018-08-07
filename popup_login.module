@@ -1,0 +1,219 @@
+<?php
+
+use Drupal\Core\Ajax\AppendCommand;
+use Drupal\Core\Ajax\AjaxResponse;
+use Drupal\Core\Ajax\RedirectCommand;
+use Drupal\Core\Form\FormBase;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Language\LanguageManagerInterface;
+use Drupal\user\UserStorageInterface;
+use Drupal\user\Entity\User;
+use Drupal\user\UserInterface;
+use Drupal\Core\Url;
+use Drupal\Core\Link;
+
+/**
+ * hook_form_alter()
+ */
+function popup_login_form_alter(array &$form, FormStateInterface $form_state, $form_id){
+	
+	$param = \Drupal::request()->query->all();
+	$current_path = \Drupal::service('path.current')->getPath();
+	
+	if($param['_wrapper_format'] == 'drupal_modal' || $param['_wrapper_format'] == 'drupal_ajax'){
+	
+		if($form_id == 'user_login_form'){
+			$form['#prefix'] = '<div id="popup_login_block_wrapper">';
+			$form['#suffix'] = '</div>';
+			unset($form['actions']['submit']);
+
+			$items = [];
+			if(\Drupal::config('user.settings')->get('register') != USER_REGISTER_ADMINISTRATORS_ONLY){
+				$signup_url = Url::fromRoute('user.register');
+				$signup_url->setOptions([
+					'attributes' => [
+						'title' => t('Create a new user account.'),
+						'class' => ['use-ajax', 'button--small'],
+						'data-dialog-type' => 'modal',
+					]
+				]);
+				$items['create_account'] = Link::fromTextAndUrl(t('Create new account'), $signup_url);
+			}
+			
+			$pass_url = Url::fromRoute('user.pass');
+			$pass_url->setOptions([
+				'attributes' => [
+					'title' => t('Request new password via email.'),
+					'class' => ['use-ajax', 'button--small'],
+					'data-dialog-type' => 'modal',
+				]
+			]);
+			$items['request_password'] = Link::fromTextAndUrl(t('Request new password'), $pass_url);
+
+			$form['user_links'] = [
+				'#theme' => 'item_list',
+				'#items' => $items,
+			];
+			
+			$form['actions']['next'] = [
+				'#type' => 'submit',
+				'#value' => t('Log in'),
+				'#ajax' => [
+					'callback' => 'popupCallback',
+					'wrapper' => 'popup_login_block_wrapper',
+				],
+			];
+		}
+		
+		if($form_id == 'user_register_form'){
+			
+			$form['#prefix'] = '<div id="popup_signup_block_wrapper">';
+			$form['#suffix'] = '</div>';
+			unset($form['actions']['submit']);
+			
+			$form['actions']['next'] = [
+				'#type' => 'submit',
+				'#value' => t('Create new account'),
+				'#ajax' => [
+					'callback' => 'popupSignupCallback',
+					'wrapper' => 'popup_signup_block_wrapper',
+				],
+			];
+		}
+		
+		if($form_id == 'user_pass'){
+			
+			$form['#prefix'] = '<div id="popup_pass_block_wrapper">';
+			$form['#suffix'] = '</div>';
+			unset($form['actions']['submit']);
+			
+			$form['actions']['next'] = [
+				'#type' => 'submit',
+				'#value' => t('Submit'),
+				'#ajax' => [
+					'callback' => 'popupPassCallback',
+					'wrapper' => 'popup_pass_block_wrapper',
+				],
+			];
+		}
+	
+	}
+}
+
+  
+  /**
+   * Callback for both ajax-enabled buttons.
+   *
+   * Selects and returns the fieldset with the names in it.
+   */
+  
+function popupCallback(array &$form, FormStateInterface $form_state) {
+	
+	global $base_url;
+	
+	$submitted = $form_state->isSubmitted();
+	$executed = $form_state->isExecuted();
+	$errors = $form_state->hasAnyErrors();
+	$get_errors = $form_state->getErrors();
+	$get_redirect = $form_state->getRedirect();
+	
+	//var_dump($submitted); var_dump($executed);die;
+	
+	if($submitted && $executed){
+		$username = $form_state->getValues('name');
+		$user = user_load_by_name($username);
+		
+		$uid = $user->id();
+		$user = User::load($uid);
+		user_login_finalize($user);
+		
+		$response = new AjaxResponse();
+		$response->addCommand(new RedirectCommand($base_url.'/user'));
+		return $response;
+	}
+	
+	return $form;
+}
+
+
+function popupSignupCallback(array &$form, FormStateInterface $form_state) {
+	
+	global $base_url;
+	
+	$config = \Drupal::config('user.settings');
+	$verify_mail = $config->get('verify_mail');
+	
+	$values = $form_state->getValues();
+	
+	$submitted = $form_state->isSubmitted();
+	$executed = $form_state->isExecuted();
+	
+	if($submitted && $executed){
+		
+		$language = \Drupal::languageManager()->getCurrentLanguage()->getId();
+		$user = \Drupal\user\Entity\User::create();
+		
+		$name = $values['name'];
+		$mail = $values['mail'];
+		$pass = $values['pass'];
+		$notify = $values['notify'];
+
+		// Mandatory.
+		$user->setUsername($name);
+		$user->setEmail($mail);
+		$user->setPassword($pass);
+		$user->enforceIsNew();
+		
+		if(!$verify_mail){
+			$user->activate();
+		}
+		$result = $user->save();
+		
+		//If require email verification
+		if($verify_mail){
+			
+			//send mail
+			_user_mail_notify('register_pending_approval', $user);
+			drupal_set_message("Thank you for applying for an account. Your account is currently pending approval by the site administrator. In the meantime, a welcome message with further instructions has been sent to your email address.\n");
+		}
+		else{
+			drupal_set_message("User account created!\n");
+			//if need to login
+			user_login_finalize($user);
+		}
+
+		$response = new AjaxResponse();
+		$response->addCommand(new RedirectCommand($base_url.'/user'));
+		return $response;
+	}
+	
+	return $form;
+}
+
+function popupPassCallback(array &$form, FormStateInterface $form_state) {
+	
+	global $base_url;
+	
+	$submitted = $form_state->isSubmitted();
+	$executed = $form_state->isExecuted();
+	
+	if($submitted && $executed){
+		
+		$langcode = \Drupal::languageManager()->getCurrentLanguage()->getId();
+		$account = $form_state->getValue('account');
+
+		$mail = _user_mail_notify('password_reset', $account, $langcode);
+		if (!empty($mail)) {
+			\Drupal::logger('user')->notice('Password reset instructions mailed to %name at %email.', ['%name' => $account->getUsername(), '%email' => $account->getEmail()]);
+			drupal_set_message(t('Further instructions have been sent to your email address.'));
+		}
+		
+		$response = new AjaxResponse();
+		$response->addCommand(new RedirectCommand($base_url.'/user'));
+		return $response;
+	}
+	
+	return $form;
+}
+
+

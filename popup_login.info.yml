@@ -1,0 +1,6 @@
+name: 'Popup Login'
+type: 'module'
+description: 'Creates a popup login and register window'
+core: '8.x'
+
+

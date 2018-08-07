@@ -1,0 +1,7 @@
+popup_login.modal:
+  path: '/popup-login/ajax'
+  defaults:
+    _controller: '\Drupal\popup_login\Controller\PopupLoginController::modal'
+    _title: ''
+  requirements:
+    _permission: 'access content'
